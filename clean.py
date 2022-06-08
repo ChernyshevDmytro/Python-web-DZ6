@@ -6,7 +6,6 @@ import re
 import os
 import shutil
 import itertools
-from threading import Thread
 
 # Creating normalisation dictionary TRANS
 CYRILLIC_SYMBOLS = "абвгдеёжзийклмнопрстуфхцчшщъыьэюяєіїґ"
