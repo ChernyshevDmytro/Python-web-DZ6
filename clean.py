@@ -1,9 +1,8 @@
-import pathlib as pl
 import asyncio
 import aiopath
 import aiofiles.os
-import re
 import os
+import re
 import shutil
 import itertools
 
@@ -27,52 +26,47 @@ trans = {}
 for cyrillic, latin in zip(CYRILLIC_SYMBOLS, TRANSLATION):
     trans[ord(cyrillic)] = latin
     trans[ord(cyrillic.upper())] = latin.upper() 
-#print(trans)
 
 # Check if Path exists
-def path_verification(path_to_folder):
+async def path_verification(path_to_folder):
     path_to_folder=rf'{path_to_folder}'
     number_of_attemps=0
     
     while number_of_attemps<10:
         number_of_attemps+=1 
-        path = pl.Path(path_to_folder)
+        path = aiopath.AsyncPath(path_to_folder)
         
-        if (not path.exists() or path.is_file()):
+        if not await path.exists() or await path.is_file():
             print(f'Please enter the valid path to folder\nYou have {9-number_of_attemps} attempts')
             path_to_folder = input('Enter path to folder:')
 
         if number_of_attemps==10:
             break         
 
-        if  path.exists():
+        if  await path.exists():
             valid_path_to_folder=  rf'{path_to_folder}' 
             return valid_path_to_folder
 
         
 # List output of folders and files. Empty folders remove                 
-def to_find_files_in_user_path(valid_path_to_folder):       
+async def to_find_files_in_user_path(valid_path_to_folder):       
     founded_files=[]
     founded_folders=[]
-    path = pl.Path(valid_path_to_folder) 
+    path = aiopath.AsyncPath(valid_path_to_folder).rglob("*") 
                           
-    for elements in path.iterdir():     
-    
-        if elements.is_file():
-            pure_path=pl.PurePath(pl.Path(elements))            
-            pure_path=str(pure_path)                                       
+    async for  elements in path:     
+        if  await elements.is_file():
+                      
+            pure_path=str(elements)                                       
             path_without_suffix_and_name=pure_path.replace(elements.suffix, '')
             path_without_suffix_and_name=pure_path.replace(elements.name, '')
             elements_name_without_suffix = elements.name.replace(elements.suffix, '')        
-            founded_files.append([elements_name_without_suffix, elements.suffix, path_without_suffix_and_name])
-                               
+            if [elements_name_without_suffix, elements.suffix, path_without_suffix_and_name] not in founded_files[:]:
+                founded_files.append([elements_name_without_suffix, elements.suffix, path_without_suffix_and_name])                             
  
-        if elements.is_dir():            
-            founded_folders.append(os.fspath(elements))
-            path_to_folder_iterate=pl.Path(elements)
-            to_find_files_in_user_path(path_to_folder_iterate)
-    #print(founded_files)
-    #print(founded_folders)    
+        if  await elements.is_dir():            
+            founded_folders.append(os.fspath(elements))        
+   
     return valid_path_to_folder, founded_files, founded_folders
    
 
@@ -83,7 +77,7 @@ def normalize(founded_files,founded_folders, valid_path_to_folder):
     path_length = len(valid_path_to_folder)+1 
     
     for i in founded_files:
-        #print(i)
+    
         if 'archives' in i[2] or 'video' in i[2] or 'audio' in i[2] or 'documents' in i[2] or 'images' in i[2]:
             founded_files_normalized.append([fr"{i[0]}", fr"{i[1]}", fr"{i[2]}"])
 
@@ -224,44 +218,35 @@ async def moving_other_filesto_separate_folder(founded_files, path_to_folder):
 
 
 async def del_empty_dirs(valid_path_to_folder):
-    path =  aiopath.AsyncPath(valid_path_to_folder)
-    
-    for items in os.scandir(path):
-        item_path = os.path.join(path, items)
+    path =  aiopath.AsyncPath(valid_path_to_folder).rglob("*")
+    str_path= str(path)
+    async for items in path:
+        try:    
+            if  await items.is_dir() and 'archives' not in str_path and 'video' not in str_path\
+                and 'audio' not in str_path and 'documents' not in str_path and 'images' not in str_path:
+                await aiofiles.os.rmdir(items)
+        except OSError:
+            continue
 
-        if await aiofiles.os.path.isdir(item_path):
-            await del_empty_dirs(item_path)
-
-            if not os.scandir(item_path) and 'archives' not in item_path and 'video' not in item_path\
-            and 'audio' not in item_path and 'documents' not in item_path and 'images' not in item_path:
-                await aiofiles.os.rmdir(item_path)
-
-
-collect_functions = [moving_pictures_to_separate_folder, moving_video_to_separate_folder, moving_documents_to_separate_folder, moving_audio_to_separate_folder, moving_archives_to_separate_folder, moving_other_filesto_separate_folder]
-
-
-
+collect_functions = [moving_pictures_to_separate_folder, moving_video_to_separate_folder, moving_documents_to_separate_folder, 
+moving_audio_to_separate_folder, moving_archives_to_separate_folder, moving_other_filesto_separate_folder]
 
 async def futures(futures):
-
     await asyncio.gather(*futures)
 
 
-
 def clean():
-    path_to_folder = input('Enter path to folder:')        
-    valid_path_to_folder=path_verification(path_to_folder) 
-    valid_path_to_folder, founded_files, founded_folders =  to_find_files_in_user_path(valid_path_to_folder)
-    #print(founded_files)     
+    path_to_folder = input('Enter path to folder:')    
+    valid_path_to_folder = asyncio.run(path_verification(path_to_folder))  
+    valid_path_to_folder, founded_files, founded_folders =  asyncio.run(to_find_files_in_user_path(valid_path_to_folder))    
     founded_files_normalized, founded_folders_normalized= normalize(founded_files,founded_folders, valid_path_to_folder)
-    list_of_rename_futures = [renaming_finded_files(founded_files_normalized, founded_files), renaming_finded_folders(founded_folders, founded_folders_normalized)]
-  
+    list_of_rename_futures =[renaming_finded_files(founded_files_normalized, founded_files), renaming_finded_folders(founded_folders, founded_folders_normalized)] 
      
     for i in collect_functions: 
         list_of_rename_futures.append(i(founded_files_normalized, valid_path_to_folder))    
-    list_of_rename_futures.append(del_empty_dirs(valid_path_to_folder))
-    asyncio.run(futures(list_of_rename_futures))
-
     
+    asyncio.run(futures(list_of_rename_futures))
+    asyncio.run(del_empty_dirs(valid_path_to_folder))
+   
 
 clean()
